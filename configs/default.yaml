@@ -1,0 +1,35 @@
+# Default vCell experiment configuration.
+# Override any field on the CLI, e.g.:
+#   vcell train --config configs/default.yaml --set train.epochs=100 model.latent_dim=64
+
+data:
+  data_path: null          # path to a .npz/.h5ad dataset; null -> generate synthetic
+  n_genes: 200             # used when synthesising / sanity-checking
+  num_perturbations: 16    # index 0 is reserved for control
+  val_fraction: 0.15
+  batch_size: 128
+  num_workers: 0
+  pert_key: perturbation   # AnnData .obs column holding perturbation labels
+  # synthetic-only knobs (ignored when data_path is set):
+  n_cells_per_pert: 300
+  effect_sparsity: 0.1     # fraction of genes affected by each perturbation
+  noise_std: 0.3
+  seed: 0
+
+model:
+  latent_dim: 32
+  hidden_dims: [256, 128]
+  dropout: 0.1
+  dose_scaling: true
+
+train:
+  epochs: 50
+  lr: 0.001
+  weight_decay: 0.00001
+  kl_beta: 0.5
+  grad_clip: 5.0
+  patience: 10
+  device: auto             # auto | cpu | cuda
+  out_dir: runs/default
+  seed: 0
+  log_every: 10
