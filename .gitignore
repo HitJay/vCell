@@ -18,6 +18,8 @@ env/
 runs/
 data/*.npz
 data/*.h5ad
+# external dataset symlinks (point outside the repo, never versioned)
+data/drug-seq
 *.ckpt
 *.pt
 
