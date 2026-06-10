@@ -1,6 +1,6 @@
 # 研究计划：HepG2 能量消耗（EE）siRNA 敲低 × DRUG-seq × TMRM 影像
 
-- 文档版本：v1（2026-06-10）
+- 文档版本：v3（2026-06-10）— 确认 **ch4 = MitoTracker**，纳入 per-mito ΔΨm 与线粒体质量两条机制轴
 - 作者：Qiuye Jin (Jay) / NNRCC
 - 数据位置（软链接）：`data/drug-seq/` → `../../vAssay_archieve/UHYG/drug-seq`
 - 读取环境：`/data/user/QYJI/miniforge3/envs/scvi/bin/python`（`base` 环境无 `anndata`）
@@ -142,6 +142,23 @@ KD 孔自身靶基因 logCPM 相对 NTC 的下降（Δ）：
 - 以细胞数为分母的指标（`*_cell_count_ratio`）在细胞大量死亡时会异常放大：`PSMC3` 的 `intensity_cell_count` z≈**+61**，Target 类该指标均值出现 **`inf`**（部分孔细胞数→0）。
 - **必做**：用 `num_umis` / `num_features` / `mt_percentage` / 细胞计数把 **"解偶联导致的 ΔΨm 下降"** 与 **"毒性死亡导致的下降"** 区分开；标记并隔离毒性孔。
 - **优先采用不含细胞数分母的指标**（`ch2_ch1_*`）作为主表型，`*_cell_count_*` 仅作辅助 + 毒性 flag。
+- **升级（见 §3.5）**：原始影像 CSV 的 **`cell_count` 绝对值已确认可得**，毒性去卷积无需再从 ratio 反推，可直接用真实细胞数 + `ch1_area`（汇合度）构建毒性分数。
+
+### 3.5 原始影像数据可得性核查（2026-06-10，风险消除 + 重大正面发现）
+
+> 主线 D 方案曾标注一个数据可得性风险：聚合脚本 [process_image_aggregation.py](../../vAssay_archieve/UHYG/drug-seq/process_image_aggregation.py) 只保留了 4 个 ratio、丢弃了 `cell_count`。经核查，**原始 CSV 完好无损，风险解除**，并发现额外数据资产。
+
+- **路径**：`/NNRCC_Image/processed_data/UHYG/2025/<板名>/<板名>.csv`，**24/24 板全部存在**，16 列结构完全一致。
+- **粒度更细**：原始为 **field（视野）级**，每板 540 行 = 60 孔 × 9 视野；之前的 `image_4features` 是 well-mean 聚合 → 现在可重做聚合并附带**孔内变异（SEM/CV）**用于 QC。
+- **`cell_count` 直接可得**：min 3 / max 1201 / mean 534，无零值 → 毒性去卷积用真实细胞数，不必反推。
+- **完整原始通道**：`ch1_intensity/area`（核/细胞）、`ch2_intensity/area`（TMRM ΔΨm）、`ch4_intensity/area`、`cell_count` → 可自由重算任意 ratio，不受既往聚合限制。另有 `readout.csv`（干净 8 列原始读出）。
+- **🔬 ch4 通道：MitoTracker（线粒体质量），已由实验方确认（2026-06-10）**。原始 CSV 含 `ch4_intensity/area` + 4 个 `ch4_ch1_*` ratio，100% 有信号，但既往 `image_4features` 聚合完全没用它。
+  - 通道含义：**ch1 = 核/细胞，ch2 = TMRM（膜电位 ΔΨm），ch4 = MitoTracker（线粒体质量）**。
+  - **关键机制解析**：`ch2/ch1` 把"膜电位"和"线粒体数量"卷在一起；MitoTracker 通道把两者拆开：
+    - **per-mito ΔΨm（偶联状态）= ch2/ch4** → 解偶联检测（BAM15 ↓）。
+    - **线粒体质量/生物合成 = ch4/ch1** → 生物合成检测（MK8722 ↑）。
+  - **实测验证（批内 NTC z）**：MK8722 在 `ch2/ch1` 上的巨幅 +20 信号，到 per-mito ΔΨm（ch2/ch4 强度）几乎消失（中位 +1.6），而线粒体质量轴 +8.3 → **MK8722 的"TMRM 升高"主要来自线粒体生物合成（数量变多），而非每个线粒体更带电**。BAM15 则在 per-mito ΔΨm 面积轴 −15（膜电位真实塌缩）。这是 MitoTracker 通道才能解开的机制。
+  - 已纳入主线 D pipeline：新增 `pheno_permito_dpsi_z`（per-mito ΔΨm）与 `pheno_mitomass_z`（线粒体质量）两条机制 z 轴，hit 方向细分为 uncoupler_like / biogenesis_like / energizer_like（见 §9.7）。
 
 ---
 
@@ -151,13 +168,11 @@ KD 孔自身靶基因 logCPM 相对 NTC 的下降（Δ）：
 
 ### 主线 D —— 数据地基工程（最先，所有课题复用）
 
-- **目标**：产出可复用的 **干净孔级表型矩阵 + KD 效率表 + 毒性 flag**。
-- **方法**：
-  1. 表达侧：CPM 归一化 + log1p；HVG 选择；批内相对 NTC 的标准化（或 scVI / Harmony / ComBat 在孔级数据上的对比评估）。
-  2. 影像侧：批内对 NTC 的 plate-wise z-score；以 BAM15/MK8722 锚定方向。
-  3. QC：KD 效率打分（含符号别名解析）、毒性去卷积、低质量孔过滤。
-- **产出**：`processed/`（标准化表达矩阵、4 维表型 z 矩阵、QC/毒性注释表）。
-- **风险**：批次校正可能过度去除真实的批次内生物学信号 → 用阳性对照效应量做"过校正"监控。
+- **目标**：产出可复用的 **干净孔级表型矩阵 + KD 效率表 + 毒性 flag**，作为 B/A/C 的唯一可信输入。
+- **方法（概要）**：表达侧 CPM+log1p / HVG / 批内相对 NTC 标准化；影像侧 field→well 聚合 + 批内 plate-wise z（BAM15/MK8722 锚定方向）；QC 含 KD 效率打分（符号别名解析）、毒性去卷积（真实 cell_count）、低质量孔标记。
+- **产出**：`data/processed/`（处理后 h5ad + vCell-ready npz + 孔级/靶点级注释表）+ `output/` QC 报告。
+- **风险**：批次校正过度去信号 → 用阳性对照效应量做"过校正"监控。
+- **➡ 完整设计、6 阶段数据流、交付物清单与默认执行参数见 [§9 主线 D 详细设计](#9-主线-d-详细设计数据地基)。**
 
 ### 主线 B —— EE hit calling（最快出可跟进结论）
 
@@ -223,9 +238,11 @@ KD 孔自身靶基因 logCPM 相对 NTC 的下降（Δ）：
 
 - [x] 在 `data/drug-seq` 建立指向数据文件夹的软链接（相对路径，已加入 `.gitignore`）。
 - [x] 勘验数据：维度、设计平衡性、assay window、KD 效率、毒性信号（本文档 §2–§3）。
-- [ ] 确认读取/分析环境（`scvi` 已具备 `anndata`；如需 scanpy/DESeq2 另行确认）。
-- [ ] 基因符号别名解析表（`group` 标签 ↔ `var['symbol']`）。
-- [ ] 主线 D 管线脚本：批内标准化 + KD-QC + 毒性去卷积。
+- [x] 原始影像 CSV 可得性核查：24/24 板全在、含 `cell_count` 与 ch4、field 级粒度（§3.5）。
+- [x] 确认读取/分析环境：`scvi` env 已具备 `anndata`（`/data/user/QYJI/miniforge3/envs/scvi/bin/python`）。
+- [x] 基因符号别名解析表（`group` 标签 ↔ `var['symbol']`）—— 主线 D 阶段 0 产出（`gene_symbol_map.csv`；仅 `ATP5B→ATP5F1B` 1 条别名）。
+- [x] 主线 D 管线脚本：批内标准化 + KD-QC + 毒性去卷积（已实现并跑通，见 §9 与 §9.7）。
+- [ ] **[待确认]** ch4 影像通道的染料身份（是否 MitoTracker；影响 per-mito ΔΨm 表型定义）。
 
 ---
 
@@ -256,3 +273,142 @@ adata_img = ad.read_h5ad("data/drug-seq/adata_with_image_4features.h5ad")  # 表
 ---
 
 *本文档为活文档（living document），随分析进展更新版本号与里程碑状态。*
+
+---
+
+## 9. 主线 D 详细设计（数据地基）
+
+> 本节是主线 D 的可交付实施方案。用户已拍板"按默认执行"，默认参数见 §9.6。
+
+### 9.0 定位
+产出一套**批次校正 + QC + 毒性去卷积后的干净孔级数据集 + 全套注释表**，作为 B/A/C 三条下游课题的**唯一可信输入（single source of truth）**。
+
+### 9.1 数据流（6 阶段，模块化）
+
+```mermaid
+flowchart TD
+    IN1["adata.h5ad<br/>raw counts 1440×36601"] --> S0
+    IN2["24 板原始 Operetta CSV<br/>field 级, 含 cell_count + ch4"] --> S0
+    S0["阶段0 加载/对齐<br/>+ 基因符号别名解析"] --> S1
+    S1["阶段1 表达QC<br/>批内离群孔检测"] --> S2
+    S2["阶段2 归一化+批次处理<br/>CPM→log1p→批内 z / ratio-to-NTC"] --> S3
+    S3["阶段3 KD效率打分<br/>strong/weak/failed 分层"] --> S4
+    S4["阶段4 影像表型+毒性去卷积<br/>field→well, 2轴z表型 + 真实cell_count毒性"] --> S5
+    S5["阶段5 打包交付物 + QC报告"]
+```
+
+| 阶段 | 做什么 | 关键点 |
+| --- | --- | --- |
+| **0 加载/对齐** | 读 adata + 24 板 CSV；well 对齐校验；建 `group↔symbol` 别名表 | `ATP5B→ATP5F1B` 类别名必须解决（KD-QC 依赖） |
+| **1 表达 QC** | `num_umis/num_features/mt_percentage` 批内 MAD/分位数离群检测 | 只标记不删（默认） |
+| **2 归一化+批次** | CPM→log1p→HVG（线粒体/OXPHOS/产热/FAO 强制保留）→批内相对 NTC z | 过校正监控：BAM15/MK8722 signature 保留 |
+| **3 KD 打分** | 靶点自身基因批内相对 NTC 的 ΔlogCPM → strong/weak/failed | SHISA5/SEC16A 应落 failed |
+| **4 影像表型+毒性** | field→well 聚合（带 SEM/CV）；批内 z 二轴表型；**真实 cell_count + ch1_area** 建毒性分数 | 主表型用 `ch2_ch1_*`；ch4 可选纳入（待确认） |
+| **5 打包** | 写 h5ad + npz + 3 张注释表 + QC 报告 | 见 §9.2 |
+
+### 9.2 交付物清单
+
+**代码**（新增，不动现有 vCell 模型代码）
+- `src/vcell/data/drugseq.py` — 6 阶段函数化 pipeline（可单测）
+- `scripts/prep_drugseq.py` — CLI 入口
+- `configs/drugseq_prep.yaml` — 阈值/路径/方法开关
+- `tests/test_drugseq_prep.py` — 冒烟测试（小子集 + 阳性对照 sanity）
+
+**数据产物**（`data/processed/`，已纳入 .gitignore）
+| 文件 | 内容 |
+| --- | --- |
+| `adata_drugseq_processed.h5ad` | 主产物：layers=`counts/lognorm/zscore`，obs 带全部注释 |
+| `drugseq_vcell.npz` | vCell 直接可吃：`X`(lognorm)、`pert`、`control_index`(NTC→0 已固化)、`num_perturbations`、meta |
+| `wells_annotation.csv` | 孔级（1440 行）：QC flag、KD 分数/层、毒性 flag、二轴表型 z |
+| `targets_summary.csv` | 靶点级（~180 行）：n 重复、KD 层、表型效应量+方向、毒性比例、hit 候选标记 |
+| `gene_symbol_map.csv` | `group`↔`symbol` 别名映射 |
+
+**报告**（`output/2026-06-10/`）
+- QC 报告（图+md）：PCA/UMAP 着色 batch vs group、阳性对照 window、KD 分层分布、毒性分布、过校正监控。
+
+### 9.3 验证标准（怎么证明地基是对的）
+- **阳性对照 sanity**：校正后 BAM15 仍落高电位面积轴↓、MK8722 仍落强度轴↑（设 z 阈值断言）。
+- **批次效应下降**：校正后 PCA 上 batch 解释方差下降、NTC 跨批次聚拢。
+- **KD-QC**：报告 strong KD 靶点占比。
+- **毒性**：cell_count 爆炸孔被正确隔离、计数合理。
+- **可重复**：固定 seed + pytest 冒烟测试通过。
+
+### 9.4 与 vCell 对接（必须处理的 2 点）
+1. **control 映射**：交付走 `npz` 路线，直接把 `control_index` 固化为 NTC→0，**绕过** [load_h5ad](../src/vcell/data/dataset.py#L116) 默认 `control_label="control"` 与 NTC 不匹配的问题。
+2. **归一化**：交付的 `X` 已是 log-normalized，匹配 vCell 默认 MSE 解码，避免 raw counts 爆炸。
+
+### 9.5 依赖与环境
+- 主路径仅需 `anndata/numpy/pandas/scipy/scikit-learn`（`scvi` env 已备）。
+- scVI/Harmony 为**可选**高级分支，默认不启用（见 9.6-A）。
+
+### 9.6 默认执行参数（本次采用）
+| 决策点 | 默认选择 |
+| --- | --- |
+| A 批次校正 | **轻量"批内 ratio-to-NTC / z-score"**（可解释、快）；scVI 仅预留接口，不默认跑 |
+| B 低质量/毒性孔 | **只标记不删**，下游按 flag 自行过滤 |
+| C 交付格式 | **h5ad + npz 都给** |
+| D 符号别名 | **本地启发式 + 手工补已知别名**（不依赖联网） |
+| E vCell 核心改动 | 默认**不改**；走 npz 绕过 control_label（若后续需 h5ad 路线再加配置项） |
+| ch4 通道 | **已确认 = MitoTracker**；纳入 per-mito ΔΨm（ch2/ch4）+ 线粒体质量（ch4/ch1）两条机制轴 |
+
+### 9.7 执行结果（2026-06-10，已落地）
+
+代码：[src/vcell/data/drugseq.py](../src/vcell/data/drugseq.py)、[scripts/prep_drugseq.py](../scripts/prep_drugseq.py)、[scripts/report_drugseq.py](../scripts/report_drugseq.py)、[configs/drugseq_prep.yaml](../configs/drugseq_prep.yaml)、[tests/test_drugseq_prep.py](../tests/test_drugseq_prep.py)。
+
+运行：`python scripts/prep_drugseq.py --config configs/drugseq_prep.yaml` → `python scripts/report_drugseq.py`（用 `scvi` env）。全量测试 22 passed。
+
+关键结果：
+- 1440 孔 × 36601 基因，HVG **2037**（含 EE 通路基因强制保留）。
+- **批次校正有效**：PCA 上原始 log-norm 的 plate 聚簇（尤其 OFGM-1205 完全分离）在批内 NTC z 后消失（图：`output/2026-06-10/figs/pca_batch_correction.png`）。
+- **阳性对照方向正确**：BAM15 `pheno_area_z≈-27`（解偶联→面积轴↓）、MK8722 `pheno_intensity_z≈+23`（AMPK→强度轴↑）。
+- **MitoTracker 机制轴（ch4 确认后纳入）**：BAM15 `pheno_permito_dpsi_z≈-19`（per-mito ΔΨm 塌缩）；MK8722 `pheno_mitomass_z≈+13`（线粒体质量↑）而 per-mito 仅微升 → 揭示 MK8722 是**生物合成驱动**，非每个线粒体更带电（图：`output/2026-06-10/figs/mechanism_axes.png`）。
+- **KD 分层**：strong 46 / weak 96 / failed 28 / unknown 7；SHISA5、SEC16A 落 failed（与勘验一致）。
+- **毒性**：判据改为 `cell_count < 0.3×同批 NTC median`（损失>70%），标记 **51 孔（4%）**；PSMC3（蛋白酶体，median 0.21）被正确识别，BAM15/MK8722（median≈1.0）正确放过。
+- **EE hit 初筛 113**，按机制细分 **uncoupler_like 94 / biogenesis_like 18（含 SIRT4、NDUFAF1 等）/ energizer_like 1**（交给主线 B 精细化）。
+
+交付物（`data/processed/`，均已 git 忽略）：`adata_drugseq_processed.h5ad`、`drugseq_vcell.npz`（NTC→0、log-norm、vCell 可直接加载，已验证）、`wells_annotation.csv`、`targets_summary.csv`、`gene_symbol_map.csv`、`prep_summary.json`；QC 报告 `output/2026-06-10/QC_report_drugseq.md` + 4 图（含机制轴 `mechanism_axes.png`）。
+
+---
+
+## 10. 原始图像位置与影像特征提取准备（2026-06-10）
+
+> 为后续用**视觉基础模型（DINOv2 等）提取影像特征**做准备，已系统盘点原始图像位置并生成机读 manifest。
+
+### 10.1 原始图像位置
+
+- **根目录**：`/NNRCC_Image/processed_data/UHYG/2025/<板名>/`，24/24 板齐全。
+- **每板内容**：
+  - `projection/` — 投影后 16-bit **TIFF**（4 通道 × 540 视野 = 2160 张/板）。
+  - `jpg/` — 8-bit **JPG** 预览（同样 2160 张/板）。
+  - `<板名>.csv` / `readout.csv` — field 级 CellProfiler 风格读出（含 `cell_count`、ch1/2/4 强度面积）。
+  - `csv/` — **已有 DINOv2 预提取特征**（384 维）+ vAssay readout 预测（`pred_MB` / `pred_AUC`）。
+- **规模**：**51,840 张 TIFF（+ 51,840 JPG）** = 24 板 × 60 孔 × 9 视野 × 4 通道，已逐一 stat 验证**零缺失**。
+
+### 10.2 通道含义（4 通道）
+
+| 通道 | 染料 / 含义 | 用途 |
+| --- | --- | --- |
+| ch1 | 核 / 细胞 | 归一化分母、细胞分割 |
+| ch2 | **TMRM**（线粒体膜电位 ΔΨm） | EE 主表型 |
+| ch3 | （read-out 中未使用） | 待确认 |
+| ch4 | **MitoTracker**（线粒体质量） | per-mito ΔΨm 归一化、生物合成轴 |
+
+### 10.3 ⚠ 两种 TIFF 命名风格（已自动处理）
+
+跨板存在两种 TIFF 命名，manifest 脚本**逐板自动探测**：
+
+- `A_hyphen`（仅 `UHYG_20250411_1` 1 板）：`r02-c02-f01-ch2-01.tiff`
+- `B_operetta`（其余 23 板）：`r02c02f01p01-ch2sk1fk1fl1.tiff`
+- JPG 全部为 Operetta 风格：`r02c02f01p01-ch2sk1fk1fl1.jpg`
+
+### 10.4 图像 manifest（机读，供视觉模型批量读取）
+
+- 脚本：[scripts/inventory_images.py](../scripts/inventory_images.py)（`--check-exists` 验证全部路径）。
+- 产物（`data/processed/`，已 git 忽略）：
+  - `image_manifest.csv` — **51,840 行**，列：`plate_batch / image_plate / tiff_style / group / category / well / field / channel / dye / tiff_path / jpg_path / tiff_exists`。每行一张图，已关联到扰动靶点 `group` 与孔 `well`。
+  - `image_manifest_plate_summary.csv` — 每板可用性汇总（24/24 complete）。
+- 用法：按 `well`/`group` 直接对接 `wells_annotation.csv`、`drugseq_vcell.npz`，实现**影像特征 ↔ 转录组 ↔ TMRM 表型**三模态对齐。
+
+### 10.5 已有 DINOv2 特征现状（版本不一）
+
+`csv/` 下已有多版本 DINOv2 特征：C1（24 板全有）、C24（19 板，2025-07 最新）、C14（7 板）、C12（3 板）。**版本不统一** → 建议用统一的视觉基础模型对全部 51,840 张原始图像**重新提特征**（原始图像已全齐），保证跨板可比。这是主线 A/E（影像特征 → EE 表型、多模态融合）的输入准备。

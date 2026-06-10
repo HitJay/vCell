@@ -1,0 +1,43 @@
+# Main line D — DRUG-seq × TMRM data-foundation pipeline config.
+# Override on the CLI, e.g.:
+#   python scripts/prep_drugseq.py --config configs/drugseq_prep.yaml --set n_hvg=3000
+
+# -- inputs --
+adata_path: data/drug-seq/adata.h5ad
+image_base: /NNRCC_Image/processed_data/UHYG/2025
+image_file_key: tmrm_operetta_data_file_name
+
+# -- obs columns --
+pert_key: group            # perturbation label; NTC = control
+batch_key: plate           # within-batch standardisation unit (24 plates)
+batch_fallback: batch      # used if batch_key is absent
+well_key: well
+category_key: category
+
+# -- expression QC (flag, never drop) --
+qc_min_umis: 50000
+qc_min_genes: 3000
+qc_max_mt: 0.30
+qc_mad_k: 5.0              # within-batch robust |z_MAD| outlier threshold
+
+# -- normalization --
+target_sum: 10000.0        # CP10K (log1p-friendly, MSE-ready)
+n_hvg: 2000
+zscore_clip: 10.0          # clip within-NTC expression z (scanpy-style)
+
+# -- knockdown efficiency tiers (fractional drop vs same-batch NTC) --
+kd_strong_drop: 0.5        # >=50% drop -> strong
+kd_weak_drop: 0.2          # 20-50% -> weak ; <20% -> failed
+
+# -- toxicity deconvolution (uses recovered absolute cell_count) --
+tox_frac: 0.3              # cell_count < this fraction of same-batch NTC median -> toxic
+tox_z_cellcount: -2.0      # informational robust log-cell_count z (not the flag)
+tox_min_cellcount: 500.0   # absolute well-total floor (cells summed over fields)
+
+# -- outputs --
+out_dir: data/processed
+report_dir: output/2026-06-10
+write_h5ad: true
+write_npz: true
+
+seed: 0
