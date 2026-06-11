@@ -40,6 +40,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--targets", nargs="+", default=["AUC", "MB"])
     ap.add_argument("--models", nargs="+", default=["ridge", "tabpfn"])
     ap.add_argument("--schemes", nargs="+", default=SCHEMES)
+    ap.add_argument("--aggregate", action="store_true",
+                    help="collapse (plate,treatment) replicates into independent "
+                         "units (removes label leakage).")
+    ap.add_argument("--sirna-only", action="store_true",
+                    help="keep only siRNA-knockdown treatments (deployment domain).")
     ap.add_argument("--out", default="output/2026-06-11/vassay_review")
     args = ap.parse_args(argv)
 
@@ -51,20 +56,22 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[skip] {csv} missing")
             continue
         for tgt in args.targets:
-            data = load_vassay_csv(csv, target=tgt)
+            data = load_vassay_csv(csv, target=tgt, aggregate=args.aggregate,
+                                   sirna_only=args.sirna_only)
             for scheme in args.schemes:
                 base = baseline_metrics(data, scheme)
                 rows.append({"channel": ch, "target": tgt, "model": "mean_baseline",
-                             "scheme": scheme, **{f"{k}": v for k, v in base.items()}})
+                             "scheme": scheme, "n": data.n,
+                             **{f"{k}": v for k, v in base.items()}})
                 for mdl in args.models:
                     res = run_cv(data, mdl, scheme)
                     rows.append({
                         "channel": ch, "target": tgt, "model": mdl, "scheme": scheme,
-                        **res.metrics_mean,
+                        "n": data.n, **res.metrics_mean,
                         **{f"{k}_std": v for k, v in res.metrics_std.items()},
                     })
                     m = res.metrics_mean
-                    print(f"{ch:4s} {tgt:3s} {mdl:7s} {scheme:16s} "
+                    print(f"{ch:4s} {tgt:3s} {mdl:7s} {scheme:16s} n={data.n:3d} "
                           f"R2={m['r2']:+.3f} r={m['pearson']:+.3f} "
                           f"rho={m['spearman']:+.3f}")
 

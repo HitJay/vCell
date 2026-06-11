@@ -74,3 +74,22 @@ def test_run_cv_and_baseline(mini_csv):
     assert res.oof_pred is not None and not np.isnan(res.oof_pred).all()
     base = baseline_metrics(d, "group_plate")
     assert "r2" in base
+
+
+def test_aggregate_collapses_replicates(mini_csv):
+    # raw: 40 wells; aggregated: one row per (plate, treatment) = 4 plates x 5 trt
+    raw = load_vassay_csv(mini_csv, target="AUC", aggregate=False)
+    agg = load_vassay_csv(mini_csv, target="AUC", aggregate=True)
+    assert raw.n == 40
+    assert agg.n == 20  # 4 plates x 5 treatments, each replicate collapsed
+    # every aggregated row is a unique (plate, treatment)
+    keys = list(zip(agg.plate, agg.treatment))
+    assert len(keys) == len(set(keys))
+
+
+def test_sirna_only_drops_compounds(mini_csv):
+    d = load_vassay_csv(mini_csv, target="AUC", sirna_only=True)
+    assert set(d.treatment).isdisjoint({"DMSO", "BAM15"})
+    assert all(t.startswith("si") for t in d.treatment)
+    d2 = load_vassay_csv(mini_csv, target="AUC", sirna_only=True, drop_controls=True)
+    assert not any(t.startswith("siNTC") for t in d2.treatment)

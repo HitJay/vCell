@@ -596,6 +596,28 @@ legacy vAssay 预测 vs drug-seq 真实 Seahorse（n=12 靶，[vassay_crossdomai
 - **不可信用途**：跨到纯 siRNA 域的绝对值标定和细粒度排序；旧 readme 的 R²≈0.77。
 - **重训建议**：若要服务 drug-seq，应用 **siRNA 域数据重训 + 强制分组 CV（按板/按靶）报告**，并附诚实泛化指标，而非沿用化合物域旧权重。需要更多独立板提升泛化。
 
+### 13.6 标签泄漏根因 + 去泄漏系统 benchmark（路线 1 跑通）
+
+**random R² 虚高的根因 = 标签泄漏（两层）：**
+1. **主因（视野共享答案）**：264 个影像样本只对应 **88 个唯一 y 值 / 36 个 (板,处理) 组**。Seahorse 是**孔级测量**，但每孔多视野/重复**共享同一个 y 值**（组内 y 的 std 中位数 = 0.00），平均 3 个样本共享 1 个 Seahorse 读数。随机 CV 把它们拆到 train+test = 开卷考试。
+2. **板效应**：板间 y 均值 std 38.7 > 板内 16.8，随机 CV 共享同板。
+
+**修复**：`load_vassay_csv(aggregate=True)` 聚合到 (板,处理) 独立单元（264→36）；`sirna_only=True` 只留 siRNA（→18 单元）；`run_cv(pooled=True)` 用 **pooled OOF** 算指标（小样本/LOTO 的正确口径，非 per-fold 平均）。
+
+**⚠ 二次方法学修正**：§13.3 报的 `group_plate R²=−1.3"泛化≈0"` 其实是 **per-fold 平均 R² 的伪影**（每折 scale 不同被平均放大）。改用 **pooled OOF** 后真相更乐观：
+
+| setting | group_treatment Spearman（C1/C12/C14/C24） |
+| --- | --- |
+| RAW（264，含视野泄漏） | 0.67 / 0.69 / 0.70 / **0.75** |
+| AGGREGATED（36，去视野泄漏） | 0.81 / 0.85 / 0.79 / **0.82** |
+| siRNA-domain（18，LOTO） | −0.10 / 0.23 / −0.14 / **0.33** |
+
+- **vAssay 对新扰动的排序能力同域内真实且强**（聚合后 Spearman 0.8），泄漏没摧毁它，聚合去视野泄漏后反而更干净。
+- **真瓶颈是 siRNA 域样本量**：LOTO 下仅 18 个独立单元，C24 ρ0.33（远超 mean baseline 的 −0.87，但太弱）。
+- 脚本：[scripts/vassay_systematic_benchmark.py](../scripts/vassay_systematic_benchmark.py)（raw/aggregated/sirna_domain 三组一键出图）；产物 `output/2026-06-11/vassay_systematic/`。
+
+**路线 1 结论**：去泄漏 pipeline 已跑通；C24 在 siRNA 域有微弱排序信号，但 **18 个独立单元远不足以训生产模型，瓶颈是样本量而非方法**。下一步要么攒更多 siRNA+Seahorse 配对，要么用 drug-seq 全量（~170 靶有影像+TMRM，但仅 16 靶有真实 Seahorse）做半监督/迁移。
+
 ---
 
-*vAssay review 完成：建立了防泄漏评估框架，澄清了"泄漏导致 R² 高估、但排序信号真实（Spearman 0.6+）"，并诚实标注了跨域局限。*
+*vAssay review 完成：建立了防泄漏评估框架 + 去泄漏 pipeline，两次诚实修正（R² 高估是泄漏；group R² 崩盘是 per-fold 伪影，pooled OOF 下排序信号 0.8 真实）；siRNA 域瓶颈定位为样本量（18 单元）。*

@@ -59,16 +59,53 @@ class VassayData:
         return ~np.isin(self.treatment, list(NON_SIRNA_TREATMENTS))
 
 
-def load_vassay_csv(path: str | Path, target: str = "AUC") -> VassayData:
-    """Load a ``train_C*.csv`` and pull out features + one Seahorse target."""
+def load_vassay_csv(
+    path: str | Path,
+    target: str = "AUC",
+    aggregate: bool = False,
+    sirna_only: bool = False,
+    drop_controls: bool = False,
+) -> VassayData:
+    """Load a ``train_C*.csv`` and pull out features + one Seahorse target.
+
+    Parameters
+    ----------
+    aggregate
+        If True, collapse the (Plate, Treatment) field/well replicates that
+        share an identical Seahorse value into a *single* independent unit
+        (mean of the DINOv2 features). This removes the label-leakage that
+        inflated the random-CV R² (264 image rows → 88 y values → 3 rows share
+        each Seahorse measurement). After aggregation every row is an
+        independent (plate, treatment) measurement.
+    sirna_only
+        Keep only siRNA-knockdown treatments (drop compounds) — match the
+        deployment domain.
+    drop_controls
+        Also drop the non-targeting siNTC controls (keep only real targets).
+    """
     df = pd.read_csv(path)
     col = TARGET_ALIASES.get(target, target)
     if col not in df.columns:
         raise KeyError(f"target {target!r} -> {col!r} not in {Path(path).name}")
     feat = [c for c in df.columns if c.startswith("DINO_Feature_")]
     feat = sorted(feat, key=lambda c: int(c.split("_")[-1]))
-    keep = df[col].notna()
-    df = df[keep]
+    df = df[df[col].notna()].copy()
+
+    if sirna_only:
+        df = df[~df["Treatment"].isin(NON_SIRNA_TREATMENTS)]
+    if drop_controls:
+        df = df[~df["Treatment"].astype(str).str.startswith("siNTC")]
+
+    if aggregate:
+        # one independent unit per (plate, treatment); mean of features, y is
+        # already constant within the group (it's the shared Seahorse value).
+        agg = {f: "mean" for f in feat}
+        agg[col] = "mean"
+        grouped = df.groupby(["Plate", "Treatment"], as_index=False).agg(agg)
+        grouped["ImgID"] = (grouped["Plate"].astype(str) + "|"
+                            + grouped["Treatment"].astype(str))
+        df = grouped
+
     channel = Path(path).stem.replace("train_", "")
     return VassayData(
         X=df[feat].to_numpy(dtype=np.float64),
@@ -167,8 +204,16 @@ class CVResult:
 def run_cv(
     data: VassayData, model_name: str, scheme: str,
     n_splits: int = 5, seed: int = 42, standardize: bool = True,
+    pooled: bool = True,
 ) -> CVResult:
-    """Out-of-fold cross-validation under a given grouping scheme."""
+    """Out-of-fold cross-validation under a given grouping scheme.
+
+    With ``pooled=True`` the headline metrics are computed on the *pooled*
+    out-of-fold predictions (all test folds concatenated, scored once). This is
+    the correct estimator for small-sample / leave-one-group-out schemes where
+    individual folds have too few points to score on their own. ``fold_metrics``
+    still holds per-fold scores (for folds with >2 points) for variance info.
+    """
     from sklearn.preprocessing import StandardScaler
 
     factory = make_model(model_name, seed)
@@ -187,8 +232,13 @@ def run_cv(
             fold_metrics.append(regression_metrics(data.y[te], pred))
 
     keys = ("r2", "pearson", "spearman", "mae")
-    mean = {k: float(np.nanmean([m[k] for m in fold_metrics])) for k in keys}
-    std = {k: float(np.nanstd([m[k] for m in fold_metrics])) for k in keys}
+    valid = ~np.isnan(oof_pred)
+    if pooled:
+        mean = regression_metrics(data.y[valid], oof_pred[valid])
+    else:
+        mean = {k: float(np.nanmean([m[k] for m in fold_metrics])) for k in keys}
+    std = ({k: float(np.nanstd([m[k] for m in fold_metrics])) for k in keys}
+           if fold_metrics else {k: float("nan") for k in keys})
     return CVResult(
         channel=data.channel, target=data.target, model=model_name,
         scheme=scheme, metrics_mean=mean, metrics_std=std,
