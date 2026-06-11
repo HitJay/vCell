@@ -576,6 +576,7 @@ AUC 预测，随机 CV vs 诚实分组 CV（Ridge，out-of-fold）：
 - **排序能力是真的**：`group_treatment`（泛化到新扰动）下 C24 Spearman **0.64**，远超 mean baseline 的 **−0.40** → 模型学到了**可迁移的排序信号**。
 - ⚠ **自我修正**：上次只看 `R²=−1.3` 下"泛化≈0"的结论过重了。R² 看绝对标定，而 **EE hit 的真正用途是排序（Spearman），它在诚实 CV 下稳健在 0.6+**。
 - 诚实通道排序（group_treatment Spearman）：**C24 ≈ C12 ≈ C14 > C1**。（与 §12.4 drug-seq LOGO 上 BF 最优不同 —— 那里是纯 siRNA 域 + y 来自真实 Seahorse；此处是化合物+siRNA 混合域 + y 来自同批 Seahorse。）
+- **TabPFN 印证**（同框架，AUC，out-of-fold）：C24 random R² 0.80/ρ 0.85 → group_plate R² −1.57 → group_treatment **R² 0.35/r 0.69/ρ 0.67**；C1 random ρ 0.83 → group_treatment ρ 0.58。TabPFN 比 Ridge 略好（C24 group_treatment R² 转正 0.35），但**泄漏模式与排序信号完全一致** → 结论与模型无关，稳健。
 
 ### 13.4 跨域外部验证（P3）
 
