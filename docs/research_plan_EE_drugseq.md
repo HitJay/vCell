@@ -541,3 +541,60 @@ jpg → 3_1_DINOv2_small.py (facebook/dinov2-small, 每通道 384 维)
 ---
 
 *主线 D 数据地基已交付；影像侧 C24 全 24 板齐全并经 Seahorse 金标准验证；三模态已孔级对齐（1440/1440，含 BF + 线粒体双影像块）。下一步：主线 B（EE hit calling，Spearman 口径）或多模态融合建模（转录组 + BF 影像 → EE 表型）。*
+
+---
+
+## 13. vAssay 历史模型 review + 防泄漏重评估（2026-06-11）
+
+> 对既往 vAssay（影像 DINOv2 → TabPFN → Seahorse）训练工作做系统 review，并建立**防泄漏评估框架**，给出可信的泛化性能。
+
+### 13.1 既往工作与问题
+
+- 训练资产已拷入仓库：`data/vassay_train/train_C{1,12,14,24}.csv`（264 孔 × 384 特征）+ `train_C14_giant.csv`（1536）+ `legacy_weights/`（8 个旧 TabPFN，git 忽略）。
+- `Treatment` 15 种 = siRNA（siATP5B/siMFN2/siMFF/siMIEF2/siAAC/siETS1/siSLC22A3/siNTC）+ 化合物（BAM15/CCCP/FCCP/DMSO/No add/Smol）。
+- **核心问题**：旧 `B2-Modeling.ipynb` 用 `KFold(shuffle=True)` 随机划分 → 同板/同处理跨 train/test 泄漏 → readme 报告的 R²≈0.77 偏乐观。
+
+### 13.2 防泄漏评估框架（已实现）
+
+- 代码：[src/vcell/vassay/](../src/vcell/vassay/) + [scripts/vassay_benchmark.py](../scripts/vassay_benchmark.py) / [vassay_crossdomain.py](../scripts/vassay_crossdomain.py) / [vassay_summary.py](../scripts/vassay_summary.py) + [tests/test_vassay.py](../tests/test_vassay.py)（5 测试，全量 29 passed）。
+- CV 方案：`random`（复现旧泄漏值）/ `group_plate`（泛化到新板）/ `group_treatment`（泛化到新扰动，部署相关）/ `logo_treatment`。
+- 运行：Ridge 用 `scvi` env；TabPFN 用 `SCIPY_ARRAY_API=1` + `cp3` env。
+
+### 13.3 关键结果（修正上次过重的判断）
+
+AUC 预测，随机 CV vs 诚实分组 CV（Ridge，out-of-fold）：
+
+| 通道 | random r | group_treatment r | group_treatment Spearman |
+| --- | --- | --- | --- |
+| C24 | 0.86 | 0.66 | **0.64** |
+| C12 | 0.84 | 0.64 | 0.61 |
+| C14 | 0.86 | 0.64 | 0.61 |
+| C1 | 0.82 | 0.58 | 0.55 |
+| mean baseline | — | — | −0.40 |
+
+- **泄漏真实但非灾难**：`R²` 在分组 CV 下转负（对跨板 scale 漂移极敏感），但 **Pearson/Spearman 只降 ~0.2**。
+- **排序能力是真的**：`group_treatment`（泛化到新扰动）下 C24 Spearman **0.64**，远超 mean baseline 的 **−0.40** → 模型学到了**可迁移的排序信号**。
+- ⚠ **自我修正**：上次只看 `R²=−1.3` 下"泛化≈0"的结论过重了。R² 看绝对标定，而 **EE hit 的真正用途是排序（Spearman），它在诚实 CV 下稳健在 0.6+**。
+- 诚实通道排序（group_treatment Spearman）：**C24 ≈ C12 ≈ C14 > C1**。（与 §12.4 drug-seq LOGO 上 BF 最优不同 —— 那里是纯 siRNA 域 + y 来自真实 Seahorse；此处是化合物+siRNA 混合域 + y 来自同批 Seahorse。）
+
+### 13.4 跨域外部验证（P3）
+
+legacy vAssay 预测 vs drug-seq 真实 Seahorse（n=12 靶，[vassay_crossdomain.py](../scripts/vassay_crossdomain.py)）：
+
+| 子集 | n | Pearson | Spearman | MAE |
+| --- | --- | --- | --- | --- |
+| 全部 | 12 | 0.76 | 0.35 | 0.18 |
+| 剔除 needs_repeat | 9 | 0.73 | **0.18** | 0.18 |
+
+- **跨到纯 siRNA 域排序能力弱**（Spearman 0.18–0.35）：Pearson 0.76 主要靠 PSMC3 一个低值点撑起。
+- 印证 §13.1 的域偏移担忧：训练域（化合物+siRNA 混合）→ 应用域（纯 siRNA KD）有分布偏移。
+
+### 13.5 结论与建议
+
+- **可信用途**：vAssay 在同域内可做 EE 排序（信 Spearman，不信绝对预测值）；C24（线粒体通道）在混合域内排序最好。
+- **不可信用途**：跨到纯 siRNA 域的绝对值标定和细粒度排序；旧 readme 的 R²≈0.77。
+- **重训建议**：若要服务 drug-seq，应用 **siRNA 域数据重训 + 强制分组 CV（按板/按靶）报告**，并附诚实泛化指标，而非沿用化合物域旧权重。需要更多独立板提升泛化。
+
+---
+
+*vAssay review 完成：建立了防泄漏评估框架，澄清了"泄漏导致 R² 高估、但排序信号真实（Spearman 0.6+）"，并诚实标注了跨域局限。*
