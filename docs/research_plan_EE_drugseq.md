@@ -1,11 +1,11 @@
 # 研究计划：HepG2 能量消耗（EE）siRNA 敲低 × DRUG-seq × TMRM 影像
 
-- 文档版本：v3（2026-06-10）— 确认 **ch4 = MitoTracker**，纳入 per-mito ΔΨm 与线粒体质量两条机制轴
+- 文档版本：v4（2026-06-11）— 订正通道身份（**ch1 = 明场 BF、ch3 = 核荧光**）；新增 §12.4 实证 BF 特征泛化最优 + 三模态纳入 BF/线粒体双影像块
 - 作者：Qiuye Jin (Jay) / NNRCC
 - 数据位置（软链接）：`data/drug-seq/` → `../../vAssay_archieve/UHYG/drug-seq`
 - 读取环境：`/data/user/QYJI/miniforge3/envs/scvi/bin/python`（`base` 环境无 `anndata`）
 - 关联框架：本仓库 `vCell`（latent-additive conditional VAE，扰动响应建模）
-- 状态：规划中（数据已勘验，准备工作就绪）
+- 状态：主线 D 数据地基已交付；影像 C1(BF)/C24(线粒体) 特征全 24 板齐全；三模态已孔级对齐（1440/1440）。下一步：主线 B / 多模态融合建模。
 
 ---
 
@@ -63,7 +63,7 @@ flowchart LR
 
 ### 2.3 TMRM 影像 4 指标
 
-均为 TMRM 通道（ch2，线粒体膜电位）相对核/细胞通道（ch1）的归一化比值：
+均为 TMRM 通道（ch2，线粒体膜电位）相对明场通道（ch1，BF）的归一化比值（原始 `image_4features` 的归一化分母；ch1 身份详见 §12.4）：
 
 | 指标 | 含义 | 所属轴 |
 | --- | --- | --- |
@@ -151,9 +151,9 @@ KD 孔自身靶基因 logCPM 相对 NTC 的下降（Δ）：
 - **路径**：`/NNRCC_Image/processed_data/UHYG/2025/<板名>/<板名>.csv`，**24/24 板全部存在**，16 列结构完全一致。
 - **粒度更细**：原始为 **field（视野）级**，每板 540 行 = 60 孔 × 9 视野；之前的 `image_4features` 是 well-mean 聚合 → 现在可重做聚合并附带**孔内变异（SEM/CV）**用于 QC。
 - **`cell_count` 直接可得**：min 3 / max 1201 / mean 534，无零值 → 毒性去卷积用真实细胞数，不必反推。
-- **完整原始通道**：`ch1_intensity/area`（核/细胞）、`ch2_intensity/area`（TMRM ΔΨm）、`ch4_intensity/area`、`cell_count` → 可自由重算任意 ratio，不受既往聚合限制。另有 `readout.csv`（干净 8 列原始读出）。
+- **完整原始通道**：`ch1_intensity/area`（明场 BF）、`ch2_intensity/area`（TMRM ΔΨm）、`ch4_intensity/area`（MitoTracker）、`cell_count`（来自 ch3 核分割）→ 可自由重算任意 ratio，不受既往聚合限制。另有 `readout.csv`（干净 8 列原始读出）。
 - **🔬 ch4 通道：MitoTracker（线粒体质量），已由实验方确认（2026-06-10）**。原始 CSV 含 `ch4_intensity/area` + 4 个 `ch4_ch1_*` ratio，100% 有信号，但既往 `image_4features` 聚合完全没用它。
-  - 通道含义：**ch1 = 核/细胞，ch2 = TMRM（膜电位 ΔΨm），ch4 = MitoTracker（线粒体质量）**。
+  - 通道含义（2026-06-11 订正，见 §12.4）：**ch1 = 明场 brightfield（BF，无标记），ch2 = TMRM（膜电位 ΔΨm），ch3 = 核荧光（Hoechst，用于分割计数），ch4 = MitoTracker（线粒体质量）**。
   - **关键机制解析**：`ch2/ch1` 把"膜电位"和"线粒体数量"卷在一起；MitoTracker 通道把两者拆开：
     - **per-mito ΔΨm（偶联状态）= ch2/ch4** → 解偶联检测（BAM15 ↓）。
     - **线粒体质量/生物合成 = ch4/ch1** → 生物合成检测（MK8722 ↑）。
@@ -242,7 +242,7 @@ KD 孔自身靶基因 logCPM 相对 NTC 的下降（Δ）：
 - [x] 确认读取/分析环境：`scvi` env 已具备 `anndata`（`/data/user/QYJI/miniforge3/envs/scvi/bin/python`）。
 - [x] 基因符号别名解析表（`group` 标签 ↔ `var['symbol']`）—— 主线 D 阶段 0 产出（`gene_symbol_map.csv`；仅 `ATP5B→ATP5F1B` 1 条别名）。
 - [x] 主线 D 管线脚本：批内标准化 + KD-QC + 毒性去卷积（已实现并跑通，见 §9 与 §9.7）。
-- [ ] **[待确认]** ch4 影像通道的染料身份（是否 MitoTracker；影响 per-mito ΔΨm 表型定义）。
+- [x] **ch4 影像通道染料身份已确认 = MitoTracker**（线粒体质量）；已纳入 per-mito ΔΨm / 线粒体质量两条机制轴（§12.4）。
 
 ---
 
@@ -303,7 +303,7 @@ flowchart TD
 | **1 表达 QC** | `num_umis/num_features/mt_percentage` 批内 MAD/分位数离群检测 | 只标记不删（默认） |
 | **2 归一化+批次** | CPM→log1p→HVG（线粒体/OXPHOS/产热/FAO 强制保留）→批内相对 NTC z | 过校正监控：BAM15/MK8722 signature 保留 |
 | **3 KD 打分** | 靶点自身基因批内相对 NTC 的 ΔlogCPM → strong/weak/failed | SHISA5/SEC16A 应落 failed |
-| **4 影像表型+毒性** | field→well 聚合（带 SEM/CV）；批内 z 二轴表型；**真实 cell_count + ch1_area** 建毒性分数 | 主表型用 `ch2_ch1_*`；ch4 可选纳入（待确认） |
+| **4 影像表型+毒性** | field→well 聚合（带 SEM/CV）；批内 z 二轴表型；**真实 cell_count + ch1_area** 建毒性分数 | 主表型用 `ch2_ch1_*`；ch4=MitoTracker 机制轴已纳入（§12.4） |
 | **5 打包** | 写 h5ad + npz + 3 张注释表 + QC 报告 | 见 §9.2 |
 
 ### 9.2 交付物清单
@@ -388,9 +388,9 @@ flowchart TD
 
 | 通道 | 染料 / 含义 | 用途 |
 | --- | --- | --- |
-| ch1 | 核 / 细胞 | 归一化分母、细胞分割 |
+| ch1 | 明场 brightfield（BF，无标记） | 形态学特征、归一化分母 |
 | ch2 | **TMRM**（线粒体膜电位 ΔΨm） | EE 主表型 |
-| ch3 | （read-out 中未使用） | 待确认 |
+| ch3 | 核荧光（Hoechst/DAPI） | Cellpose 核分割 + 计数 |
 | ch4 | **MitoTracker**（线粒体质量） | per-mito ΔΨm 归一化、生物合成轴 |
 
 ### 10.3 ⚠ 两种 TIFF 命名风格（已自动处理）
@@ -409,6 +409,135 @@ flowchart TD
   - `image_manifest_plate_summary.csv` — 每板可用性汇总（24/24 complete）。
 - 用法：按 `well`/`group` 直接对接 `wells_annotation.csv`、`drugseq_vcell.npz`，实现**影像特征 ↔ 转录组 ↔ TMRM 表型**三模态对齐。
 
-### 10.5 已有 DINOv2 特征现状（版本不一）
+### 10.5 现有 vAssay 影像 pipeline（DINOv2 → Seahorse 预测）
 
-`csv/` 下已有多版本 DINOv2 特征：C1（24 板全有）、C24（19 板，2025-07 最新）、C14（7 板）、C12（3 板）。**版本不统一** → 建议用统一的视觉基础模型对全部 51,840 张原始图像**重新提特征**（原始图像已全齐），保证跨板可比。这是主线 A/E（影像特征 → EE 表型、多模态融合）的输入准备。
+现有成熟管线在 [/das/user/QYJI/1_Pipeline](/das/user/QYJI/1_Pipeline)（git repo）：
+
+```
+jpg → 3_1_DINOv2_small.py (facebook/dinov2-small, 每通道 384 维)
+    → DINO2_features.csv (2160 行 = 540 视野 × 4 通道, 带 Channel 列)
+    → 4_FeatureAggregation.py (按 channel=[..] 选通道 + 孔级均值)
+    → *_C<通道>_ID_aggre.csv (60 孔 × 384 维)
+    → 5_vAssay_Prediction.py (TabPFN 模型)
+    → vAssay_readout_C<x>.csv 加 pred_MB, pred_AUC
+```
+
+- **⚠ 纠正：`C` 后的数字 = 输入通道编号组合（不是 DINOv2 checkpoint 版本）**。已由数据级验证（C24_aggre = 通道 (2,4) 的 DINOv2 特征均值，误差 8.88e-16）：
+
+| 标记 | 输入通道 | 含义 |
+| --- | --- | --- |
+| **C1** | ch1 | 明场 BF（无标记，泛化建模最佳输入，见 §12.4） |
+| **C12** | ch1+ch2 | 核 + TMRM(ΔΨm) |
+| **C14** | ch1+ch4 | 核 + MitoTracker(质量) |
+| **C24** | ch2+ch4 | **TMRM + MitoTracker（最贴 EE/线粒体）** |
+
+- **预测目标 = Seahorse**：`pred_MB`（Maximal Breath 最大呼吸）+ `pred_AUC`；模型为 **TabPFN**（`weights/tabpfn_{MB,AUC}_{C1,C24}_v1.pkl`）。
+- 当前投产只剩 **C1 + C24** 两套模型（C12/C14 在 `weights_old/`）→ 这解释了 csv 盘点中 C1（24 板）、C24（19 板）覆盖最全。
+- **通道覆盖**：C1 全 24 板 / C24 19 板 / C14 7 板 / C12 3 板。原始图像（51,840 张）全齐 → 可用统一视觉模型（或 `3_2_DINOv2_giant.py`）重提全板保证可比。这是主线 A/E（影像特征 → EE 表型 / 多模态融合）的输入准备。
+
+### 10.6 C24 特征补齐（2026-06-10，全 24 板齐全）
+
+5 个板（`UHYG_20250804_1/2/3`、`UHYG_20250908_1`、`UHYG_20250915_1`）原缺 C24 聚合 + 预测，但**最贵的原始 DINOv2 特征（`DINO2_features.csv`）全 24 板都在** → 只需补两步轻量操作（通道 [2,4] 聚合 + TabPFN 预测），无需 GPU 重提。
+
+- 脚本：[/das/user/QYJI/1_Pipeline/backfill_C24.py](/das/user/QYJI/1_Pipeline/backfill_C24.py)（复刻 `4_FeatureAggregation.py` + `5_vAssay_Prediction.py`）。
+- 运行环境：**cp3 env + 必须 `SCIPY_ARRAY_API=1`**（tabpfn 2.1.0 的硬性要求）：
+  ```bash
+  cd /das/user/QYJI/1_Pipeline
+  SCIPY_ARRAY_API=1 /data/user/QYJI/miniforge3/envs/cp3/bin/python backfill_C24.py
+  ```
+- **验证（多角度全过）**：
+  - 聚合逻辑：特征未变的板（0624_1）我的聚合 vs 官方 = **1.78e-15**（完全一致）。
+  - TabPFN 确定性：同输入两次预测差 = **0.00**（无随机性）。
+  - 模型可复现：官方 aggre 喂当前模型，19 板 pred 误差 MB <1.2% / AUC <0.6%（系统性小差异 = 官方历史用稍早模型版本）。
+  - 旁证发现：部分旧板的 DINOv2 特征后被重提过（0714_3 官方特征 0.7599 ≠ 现 raw 0.7386）→ 官方旧 readout 用旧特征；补齐的 5 板用当前最新特征，自洽。
+- 结果：**24/24 板 C24 齐全**，格式一致（387 列 × 60 孔），pred_MB 均值 [1.33, 1.47] 落在原有板 [1.32, 1.52] 内。
+- **注意**：C1（核形态）与 C24（线粒体）readout 孔级/靶点级相关性都不高（靶点级 pred_MB Pearson −0.07），阳性对照方向常相反 → 二者捕捉**互补非冗余**信息，EE/线粒体分析须用 **C24**，勿假设不同通道预测一致。
+
+---
+
+## 11. Seahorse 金标准验证（2026-06-10）— vAssay 真实准确度
+
+> 部分 target 同时做了**真实 Seahorse 测量**，构成 vAssay（C24 影像 → TabPFN）的金标准对照。这是评估"准确度"的硬指标。
+
+### 11.1 数据来源与口径
+
+- 真值来源：`image.png`（部分 target 测了真实 Seahorse），已逐行转录为 [data/seahorse_vAssay_validation.csv](../data/seahorse_vAssay_validation.csv)（git 跟踪，手工金标准源数据，非脚本产物）。
+- 字段：`target / seahorse_assay_date / seahorse_AUC_value / _pct / vassay_image_date / vassay_AUC_value / _pct / needs_repeat / notes`。
+- **口径**：`_pct` = 相对**同板 NTC** 归一化（NTC=1），是跨板可比的正确指标；`vassay_AUC_value` 即 pipeline 的 `pred_AUC`（NTC 112.55 / PSMC3 57.69 吻合，确认数据链路一致）。
+- `0530_Plate3 needs repeat`（影像质量存疑）已用 `needs_repeat` 标记。
+
+### 11.2 准确度（target 级，vAssay vs 真实 Seahorse AUC%）
+
+| 版本 | n | Pearson | Spearman | MAE |
+| --- | --- | --- | --- | --- |
+| 历史 vAssay（图中值） | 12 | 0.76 | 0.35 | 0.18 |
+| **当前补齐 vAssay** | **16** | **0.77** | **0.55** | 0.20 |
+
+- 脚本：[scripts/validate_seahorse.py](../scripts/validate_seahorse.py)（`scvi` env）；产物 `output/2026-06-10/figs/seahorse_validation.png` + `seahorse_validation_targets.csv`。
+- 当前补齐版**排序能力更好**（Spearman 0.35 → 0.55），且多覆盖 4 个图中未填值的 target（RREB1 / SLC12A8 / UBE2D4 / ZC3H7B）——这是补齐 5 板的直接价值。
+
+### 11.3 关键结论（诚实评估）
+
+- **趋势 / 排序正确**：PSMC3（真值最低 0.31）vAssay 也预测最低；CEP68 / RREB1（真值高）也预测高。Pearson 0.77 与既往 vAssay R²≈0.75 量级吻合 → C24 影像确实承载 Seahorse 信息。
+- **系统性高估（回归到 NTC）**：散点图所有点都在 y=x 上方，预测整体被压缩贴近 1.0（SEC16A 真值 0.60 但预测 0.999），对**强 EE 抑制靶不够敏感**，当前版压缩更明显。
+- **下游指导**：用 `vAssay_AUC` 做 EE hit 排序时**信相对排序（Spearman），勿信绝对预测值**。这也再次印证 C24（线粒体通道）对 Seahorse 有效，C1 对不上。
+
+---
+
+## 12. 三模态对齐（2026-06-10）
+
+> 把**转录组 × C24 影像 × TMRM 机制轴表型**在孔级统一对齐成一个 AnnData，供下游多模态建模。
+
+### 12.1 对齐结构与覆盖
+
+- 对齐键：`(image_plate, well)`，**1440/1440 孔三模态 100% 对齐，零缺失**。
+- 代码：[src/vcell/data/multimodal.py](../src/vcell/data/multimodal.py) + [scripts/align_multimodal.py](../scripts/align_multimodal.py)；产物 `data/processed/adata_multimodal.h5ad`（git 忽略）。
+
+| 模态 | 存放位置 | 内容 |
+| --- | --- | --- |
+| 转录组 | `layers['counts'/'lognorm']`，`obsm['X_lognorm_hvg'/'X_zscore_hvg']` | 36601 基因 / 2037 HVG |
+| C24 影像 | `obsm['X_dino_c24']`（384 维）+ `obs['vassay_pred_MB'/'vassay_pred_AUC']` | DINOv2 特征 + Seahorse 预测 |
+| TMRM 表型 | `obs['pheno_*_z']` + `kd_tier` + `tox_flag` | 4 条机制轴 + KD + 毒性 |
+
+### 12.2 一致性分析（关键发现）
+
+脚本 [scripts/analyze_multimodal.py](../scripts/analyze_multimodal.py)；图 `output/2026-06-10/figs/multimodal_consistency.png`。靶点级、批内 NTC 标准化、排除毒性孔。
+
+- **每个模态内部信号真实可重复**（split-half reliability）：TMRM 机制轴 r 0.75–0.88、Seahorse pred_MB 0.87、pred_AUC 0.60 —— 都很高。**唯一例外**：OXPHOS 转录组评分 r 仅 **0.12**（孔级 bulk 转录组单基因评分噪声大，靶点信号弱）。
+- **但模态之间几乎不相关**（靶点级 Pearson 多在 ±0.25 内）：permito ΔΨm ↔ pred_AUC −0.24、mitomass ↔ pred_MB +0.23、OXPHOS ↔ pred_AUC +0.16。
+- **TMRM 内部高度自洽**（permito ↔ area 0.73、intensity ↔ area 0.63），说明低跨模态相关不是噪声所致。
+
+### 12.3 结论与建模指引
+
+- **这不是对齐错误**，而是真实的数据结构：三个模态各自可重复，但测量**互补的生物学层面**（mRNA 表达 ≠ 膜电位 ≠ Seahorse 呼吸）。
+- **多模态的价值在"互补信息"而非"冗余验证"** → 下游应做**融合建模**（如转录组 + 影像联合预测 EE），而非期待模态间相互印证。
+- OXPHOS 单基因评分信号弱 → 转录组侧应改用**通路评分 / 差异表达 signature**（主线 C）而非朴素基因均值。
+
+### 12.4 ⚠ 通道身份订正 + 明场（BF）特征更适合建模
+
+**通道身份订正**（2026-06-11，据 [2_tmrm.py](/das/user/QYJI/1_Pipeline/2_tmrm.py) 代码 + 实图核对，纠正之前的错误）：
+
+| 通道 | 真实身份 | 证据 |
+| --- | --- | --- |
+| **ch1** | **明场 brightfield（BF，无标记）** | 处理时 `cv2.bitwise_not` 反转；实图为灰底半透明贴壁细胞 |
+| ch2 | TMRM 荧光（ΔΨm） | Otsu 取亮信号 |
+| **ch3** | **核荧光 Hoechst/DAPI** | Cellpose `model_type='nuclei'` 分割计数；实图黑底亮核 |
+| ch4 | MitoTracker 荧光（质量） | Otsu 取亮信号 |
+
+→ **C1 = ch1 = 明场（BF）**（数据级验证 C1_aggre = 通道 (1) 均值）。`cell_count` 来自 ch3 核分割。
+
+**实证：BF 特征泛化最好**（留一靶交叉验证 LOGO，预测真实 Seahorse，n=16 靶，图 `output/2026-06-10/figs/feature_modality_benchmark.png`）：
+
+| 特征 | LOGO CV Pearson |
+| --- | --- |
+| **C1 / 明场 BF** | **+0.38（最强）** |
+| transcriptome HVG | +0.26 |
+| C24 / 线粒体染料 | +0.02（最弱） |
+
+- **反直觉但关键**：C24 的 vAssay 0.77（§11）是 pipeline TabPFN 在**同分布**上的拟合；这里是对**全新 target 泛化**（LOGO，杜绝泄漏）。C24 线粒体染料特征**过度专门化**，泛化差；**BF 明场编码更广义、可迁移的细胞形态/状态**，反而泛化最好。
+- 印证建模哲学：**无标记 BF 特征更适合做泛化建模的输入**（更便宜、更通用、避免用下游表型染料当输入的循环性）。
+- 三模态对象已同时纳入 **`obsm['X_dino_c1']`（BF）** 与 **`obsm['X_dino_c24']`（线粒体）** 两个独立 384 维影像块（[align_multimodal.py](../scripts/align_multimodal.py) `--channels C1 C24`），建模时按需选用：BF 做泛化输入，C24 做线粒体表型相关。
+
+---
+
+*主线 D 数据地基已交付；影像侧 C24 全 24 板齐全并经 Seahorse 金标准验证；三模态已孔级对齐（1440/1440，含 BF + 线粒体双影像块）。下一步：主线 B（EE hit calling，Spearman 口径）或多模态融合建模（转录组 + BF 影像 → EE 表型）。*

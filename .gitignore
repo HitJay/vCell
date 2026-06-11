@@ -25,8 +25,12 @@ data/processed/
 output/
 *.ckpt
 *.pt
+# legacy vAssay TabPFN weights (large, copied for baseline reference)
+data/vassay_train/legacy_weights/
+*.pkl
 
 # Editor / OS
 .vscode/
 .idea/
 .DS_Store
+image.png
