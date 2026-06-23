@@ -23,6 +23,15 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
+plt.rcParams.update({
+    "font.size": 11,
+    "axes.titlesize": 13,
+    "axes.labelsize": 11,
+    "xtick.labelsize": 9,
+    "ytick.labelsize": 9,
+    "legend.fontsize": 9,
+})
+
 
 STATE_ORDER = [
     "neutral_or_uncertain",
@@ -130,7 +139,7 @@ def make_qc_pca(adata, out: Path) -> Path:
     obs = adata.obs.copy()
     plates = obs["plate"].astype(str).to_numpy()
 
-    fig, axes = plt.subplots(1, 2, figsize=(12.8, 5.2))
+    fig, axes = plt.subplots(1, 2, figsize=(15.4, 6.3))
     for ax, embedding, title in [
         (axes[0], raw, "Before within-NTC standardization"),
         (axes[1], corrected, "After within-NTC standardization"),
@@ -199,7 +208,7 @@ def make_target_pca(adata, target_table: pd.DataFrame, out: Path, min_target_wel
     meta["drugseq_pc1"] = coords[:, 0]
     meta["drugseq_pc2"] = coords[:, 1]
 
-    fig, ax = plt.subplots(figsize=(8.3, 6.2))
+    fig, ax = plt.subplots(figsize=(11.2, 8.0))
     for state in safe_state_order(meta["state_class"]):
         mask = meta["state_class"].eq(state)
         ax.scatter(
@@ -242,7 +251,7 @@ def make_state_count_plot(target_table: pd.DataFrame, out: Path) -> Path:
         col for col in kd.columns if col not in {"strong", "weak", "failed", "unknown"}
     ]
 
-    fig, axes = plt.subplots(1, 2, figsize=(13.2, 5.2), gridspec_kw={"width_ratios": [1, 1.2]})
+    fig, axes = plt.subplots(1, 2, figsize=(15.2, 6.2), gridspec_kw={"width_ratios": [1, 1.2]})
     labels = [STATE_LABELS.get(state, state) for state in counts.index]
     axes[0].barh(labels, counts.to_numpy(), color=[STATE_COLORS.get(state, "#666666") for state in counts.index])
     axes[0].invert_yaxis()
@@ -274,7 +283,7 @@ def make_program_state_heatmap(target_table: pd.DataFrame, out: Path) -> tuple[P
     available_programs = [col for col in PROGRAM_COLS if col in data.columns]
     summary = data.groupby("state_class")[available_programs].mean().reindex(state_order)
 
-    fig, ax = plt.subplots(figsize=(10.8, 5.8))
+    fig, ax = plt.subplots(figsize=(13.2, 6.8))
     max_abs = float(np.nanmax(np.abs(summary.to_numpy()))) if not summary.empty else 1.0
     max_abs = max(max_abs, 0.25)
     image = ax.imshow(summary.to_numpy(), cmap="RdBu_r", vmin=-max_abs, vmax=max_abs, aspect="auto")
@@ -304,7 +313,7 @@ def make_correlation_heatmap(correlations: pd.DataFrame, out: Path) -> Path:
     corr = correlations.set_index("pathway")[pheno_cols].copy()
     corr.index = [PROGRAM_LABELS.get(f"path_{idx}", idx) for idx in corr.index]
 
-    fig, ax = plt.subplots(figsize=(7.4, 5.8))
+    fig, ax = plt.subplots(figsize=(10.4, 7.2))
     image = ax.imshow(corr.to_numpy(), cmap="RdBu_r", vmin=-0.55, vmax=0.55, aspect="auto")
     ax.set_yticks(np.arange(len(corr.index)))
     ax.set_yticklabels(corr.index)
@@ -333,7 +342,7 @@ def make_candidate_bubble(target_table: pd.DataFrame, out: Path) -> Path:
         data = data.nlargest(45, "consensus_score")
     sizes = 48 + 18 * data["consensus_score"].fillna(0).clip(lower=0)
 
-    fig, ax = plt.subplots(figsize=(9, 6.8))
+    fig, ax = plt.subplots(figsize=(11.4, 8.2))
     for state in safe_state_order(data["state_class"]):
         mask = data["state_class"].eq(state)
         ax.scatter(
@@ -368,7 +377,7 @@ def make_toxicity_plot(target_table: pd.DataFrame, out: Path) -> tuple[Path, pd.
     data["tox_rate"] = data["tox_rate"].fillna(0)
     xcol = "path_APOPTOSIS_TOXICITY"
     ycol = "path_PROTEOSTASIS_AUTOPHAGY"
-    fig, ax = plt.subplots(figsize=(8.8, 6.4))
+    fig, ax = plt.subplots(figsize=(11.4, 8.0))
     for state in safe_state_order(data["state_class"]):
         mask = data["state_class"].eq(state)
         ax.scatter(
@@ -569,7 +578,7 @@ def render_html(
         linear-gradient(135deg, #12343a 0%, #176d6b 58%, #d6a35b 100%);
       color: #ffffff;
     }}
-    .wrap {{ max-width: 1180px; margin: 0 auto; padding: 0 24px 42px; }}
+    .wrap {{ max-width: 1380px; margin: 0 auto; padding: 0 28px 42px; }}
     .eyebrow {{ text-transform: uppercase; letter-spacing: 0.12em; font-size: 12px; opacity: 0.82; }}
     h1 {{ margin: 10px 0 10px; font-size: clamp(30px, 4vw, 52px); line-height: 1.08; letter-spacing: 0; }}
     h2 {{ margin: 0 0 14px; font-size: 24px; }}
@@ -586,6 +595,7 @@ def render_html(
     .grid {{ display: grid; gap: 16px; }}
     .grid.two {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
     .grid.three {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
+    .figure-stack {{ grid-template-columns: 1fr; gap: 24px; }}
     .metric {{
       padding: 16px;
       border: 1px solid var(--line);
@@ -646,7 +656,7 @@ def render_html(
     <section class="section">
       <h2>1. 数据质量和扰动质量</h2>
       <p>总 QC-fail well 比例为 <b>{qc_fail_rate:.1%}</b>，tox-flag well 比例为 <b>{toxic_well_rate:.1%}</b>。plate-wise NTC 标准化后，批次结构明显减弱，说明后续 target-level signature 可以用于跨 plate 汇总。</p>
-      <div class="grid two">
+    <div class="grid figure-stack">
         <figure>
           <img src="{fig['qc_pca']}" alt="DRUG-seq QC PCA">
           <figcaption>同一批数据在 raw log-normalized HVG 和 within-NTC z-score HVG 下的 PCA。右图是后续分析使用的标准化空间。</figcaption>
@@ -670,7 +680,7 @@ def render_html(
     <section class="section">
       <h2>3. 通路程序：DRUG-seq 如何解释 MoA 状态</h2>
       <p>每个 MoA state 都有相对稳定的 transcriptomic program 均值。报告中的 program score 是 target-level signature 上的通路读出，适合做机制审稿而不是单独作为 hit gate。</p>
-      <div class="grid two">
+    <div class="grid figure-stack">
         <figure>
           <img src="{fig['program_state']}" alt="program state heatmap">
           <figcaption>按 MoA state 聚合的 DRUG-seq program score。toxic-collapse 的 apoptosis/toxicity 和 stress 读出最值得关注。</figcaption>
