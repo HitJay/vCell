@@ -234,10 +234,24 @@ def state_block_similarity(M: np.ndarray, meta: pd.DataFrame, space: str) -> pd.
             })
     return pd.DataFrame(rows)
 
+def pairwise_long_table(mats: dict[str, np.ndarray], meta: pd.DataFrame) -> pd.DataFrame:
+    groups = meta["group"].to_numpy()
+    states = meta["state_class"].to_numpy()
+    i, j = np.triu_indices(len(groups), k=1)
+    rows = {
+        "target_a": groups[i],
+        "target_b": groups[j],
+        "state_a": states[i],
+        "state_b": states[j],
+        "same_state": states[i] == states[j],
+    }
+    for key, mat in mats.items():
+        rows[key] = mat[i, j]
+    return pd.DataFrame(rows)
 
 def plot_matrix(M: np.ndarray, meta: pd.DataFrame, title: str, out: Path) -> None:
-    fig, ax = plt.subplots(figsize=(9.5, 8.5))
-    im = ax.imshow(M, cmap="RdBu_r", vmin=-1, vmax=1, interpolation="nearest")
+    fig, ax = plt.subplots(figsize=(8.2, 7.4))
+    im = ax.imshow(M, cmap="RdBu_r", vmin=-1, vmax=1, interpolation="hanning", rasterized=True)
     ax.set_title(title, fontsize=13, weight="bold")
     ax.set_xticks([])
     ax.set_yticks([])
@@ -269,6 +283,28 @@ def plot_matrix(M: np.ndarray, meta: pd.DataFrame, title: str, out: Path) -> Non
     fig.savefig(out, dpi=180)
     plt.close(fig)
 
+def plot_agreement_bars(compare: pd.DataFrame, nn_summary: pd.DataFrame, out: Path) -> None:
+    merged = compare.merge(nn_summary, on=["space_a", "space_b"], how="left")
+    labels = [f"{a}\nvs\n{b}" for a, b in zip(merged["space_a"], merged["space_b"])]
+    fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.2), sharex=False)
+    metrics = [
+        ("pearson_upper_triangle", "Matrix Pearson r", "#0b4f7a"),
+        ("spearman_upper_triangle", "Matrix Spearman rho", "#287c8e"),
+        ("mean_overlap_fraction", "Top-10 neighbor overlap", "#347a3d"),
+    ]
+    for ax, (col, title, color) in zip(axes, metrics):
+        vals = merged[col].to_numpy(float)
+        ax.bar(labels, vals, color=color, alpha=0.86)
+        for x, val in enumerate(vals):
+            ax.text(x, val + 0.015, f"{val:.2f}", ha="center", va="bottom", fontsize=10, weight="bold")
+        ax.set_ylim(0, max(0.7, float(np.nanmax(vals)) + 0.12))
+        ax.set_title(title, fontsize=12, weight="bold")
+        ax.grid(axis="y", alpha=0.2)
+        ax.tick_params(axis="x", labelsize=9)
+    fig.suptitle("DRUG-seq and DINOv2 similarity-atlas agreement", fontsize=15, weight="bold")
+    fig.tight_layout()
+    fig.savefig(out, dpi=180)
+    plt.close(fig)
 
 def plot_scatter(mats: dict[str, np.ndarray], out: Path) -> None:
     pairs = [("drugseq", "dino_c1"), ("drugseq", "dino_c24"), ("dino_c1", "dino_c24")]
@@ -288,6 +324,25 @@ def plot_scatter(mats: dict[str, np.ndarray], out: Path) -> None:
     fig.savefig(out, dpi=180)
     plt.close(fig)
 
+def plot_pair_distribution(pair_df: pd.DataFrame, out: Path) -> None:
+    pairs = [("drugseq", "dino_c1"), ("drugseq", "dino_c24"), ("dino_c1", "dino_c24")]
+    fig, axes = plt.subplots(1, 3, figsize=(13.8, 4.3), sharey=True)
+    for ax, (a, b) in zip(axes, pairs):
+        delta = np.abs(pair_df[a].to_numpy(float) - pair_df[b].to_numpy(float))
+        same = pair_df["same_state"].to_numpy(bool)
+        bins = np.linspace(0, max(0.9, np.nanpercentile(delta, 99)), 36)
+        ax.hist(delta[~same], bins=bins, color="#9fb6c7", alpha=0.7, label="different state")
+        ax.hist(delta[same], bins=bins, color="#b45f1b", alpha=0.65, label="same state")
+        ax.axvline(np.nanmedian(delta), color="#17212b", lw=1.4, linestyle="--", label=f"median {np.nanmedian(delta):.2f}")
+        ax.set_title(f"|{a} - {b}|", fontsize=12, weight="bold")
+        ax.set_xlabel("absolute similarity difference")
+        ax.grid(axis="y", alpha=0.18)
+    axes[0].set_ylabel("target-pair count")
+    axes[-1].legend(frameon=False, fontsize=9)
+    fig.suptitle("Target-pair similarity differences", fontsize=15, weight="bold")
+    fig.tight_layout()
+    fig.savefig(out, dpi=180)
+    plt.close(fig)
 
 def plot_block_heatmap(blocks: pd.DataFrame, out: Path) -> None:
     spaces = list(pd.unique(blocks["space"]))
@@ -311,6 +366,24 @@ def plot_block_heatmap(blocks: pd.DataFrame, out: Path) -> None:
     fig.savefig(out, dpi=180)
     plt.close(fig)
 
+def plot_block_summary(blocks: pd.DataFrame, out: Path) -> None:
+    fig, axes = plt.subplots(1, 3, figsize=(15.2, 4.9), sharey=True)
+    for ax, space in zip(axes, ["drugseq", "dino_c1", "dino_c24"]):
+        sub = blocks[blocks["space"].eq(space)]
+        within = sub[sub["state_a"].eq(sub["state_b"])].copy()
+        within["state_label"] = within["state_a"].map(STATE_LABEL)
+        colors = ["#c93a4a", "#7f78bd", "#e6863a", "#56b79a", "#9e9e9e"]
+        ax.barh(within["state_label"], within["mean_similarity"], color=colors[: len(within)], alpha=0.88)
+        for y, val in enumerate(within["mean_similarity"]):
+            ax.text(val + (0.01 if val >= 0 else -0.01), y, f"{val:.2f}", va="center", ha="left" if val >= 0 else "right", fontsize=10)
+        ax.axvline(0, color="#17212b", lw=0.8)
+        ax.set_xlim(-0.08, 0.58)
+        ax.set_title(space, fontsize=12, weight="bold")
+        ax.grid(axis="x", alpha=0.2)
+    fig.suptitle("Within-state mean similarity by modality", fontsize=15, weight="bold")
+    fig.tight_layout()
+    fig.savefig(out, dpi=180)
+    plt.close(fig)
 
 def html_table(df: pd.DataFrame, max_rows: int = 20) -> str:
     view = df.head(max_rows).copy()
@@ -346,28 +419,34 @@ def render_html(out: Path, compare: pd.DataFrame, nn_summary: pd.DataFrame, bloc
   <section>
     <h2>Matrix Agreement</h2>
     <p>Upper-triangle correlations compare all target-target similarities. Positive values mean two spaces organize target pairs similarly.</p>
+        <img src="figs/similarity_agreement_bars.png" alt="similarity agreement bars">
     {html_table(compare)}
     <p class="muted">Interpretation: this is a global matrix comparison, stricter than t-SNE/UMAP visualization.</p>
+        <p><strong>Takeaway:</strong> DRUG-seq and DINOv2 target-similarity atlases are moderately concordant. C24 mitochondrial DINO is more aligned with DRUG-seq than C1 brightfield, while C1 and C24 are most similar to each other. This supports complementarity rather than replacement.</p>
   </section>
   <section>
     <h2>Similarity Scatter</h2>
     <img src="figs/similarity_upper_triangle_scatter.png" alt="similarity scatter">
   </section>
-  <section>
-    <h2>Nearest-neighbor Overlap</h2>
-    <p>Mean overlap of top-k neighbors per target. This answers whether each target's closest neighbors are similar across spaces.</p>
-    {html_table(nn_summary)}
-  </section>
-  <section>
-    <h2>Similarity Matrices</h2>
-    <img src="figs/drugseq_similarity_matrix.png" alt="drugseq similarity matrix">
-    <img src="figs/dino_c1_similarity_matrix.png" alt="dino c1 similarity matrix">
-    <img src="figs/dino_c24_similarity_matrix.png" alt="dino c24 similarity matrix">
-  </section>
-  <section>
-    <h2>State-level Block Similarity</h2>
-    <img src="figs/state_block_similarity_heatmap.png" alt="state block similarity heatmap">
-    {html_table(blocks, max_rows=50)}
+    <section>
+        <h2>Nearest-neighbor Overlap and Pair Differences</h2>
+        <p>Mean overlap of top-k neighbors per target answers whether each target's closest neighbors are similar across spaces. The distribution plot shows how far pairwise similarities move between modalities.</p>
+        {html_table(nn_summary)}
+        <img src="figs/similarity_difference_distributions.png" alt="similarity difference distributions">
+    </section>
+    <section>
+        <h2>State-level Summary</h2>
+        <p>These aggregated views are the recommended main figures. They avoid the raw target-matrix mosaic while preserving the biological story.</p>
+        <img src="figs/state_within_similarity_bars.png" alt="within-state similarity bars">
+        <img src="figs/state_block_similarity_heatmap.png" alt="state block similarity heatmap">
+        {html_table(blocks, max_rows=50)}
+    </section>
+    <section>
+        <h2>Supplementary Raw Matrices</h2>
+        <p class="muted">Raw 175×175 matrices are retained for audit only. They naturally look pixelated at target resolution.</p>
+        <img src="figs/drugseq_similarity_matrix.png" alt="drugseq similarity matrix">
+        <img src="figs/dino_c1_similarity_matrix.png" alt="dino c1 similarity matrix">
+        <img src="figs/dino_c24_similarity_matrix.png" alt="dino c24 similarity matrix">
   </section>
   <section>
     <h2>Files</h2>
@@ -376,6 +455,7 @@ def render_html(out: Path, compare: pd.DataFrame, nn_summary: pd.DataFrame, bloc
       <li><code>neighbor_overlap_summary.csv</code></li>
       <li><code>neighbor_overlap_by_target.csv</code></li>
       <li><code>state_block_similarity.csv</code></li>
+    <li><code>pairwise_similarity_long.csv</code></li>
       <li><code>*_similarity_matrix.csv</code></li>
     </ul>
   </section>
@@ -419,9 +499,14 @@ def main() -> int:
     nn_summary.to_csv(out / "neighbor_overlap_summary.csv", index=False)
     nn_detail.to_csv(out / "neighbor_overlap_by_target.csv", index=False)
     block_df.to_csv(out / "state_block_similarity.csv", index=False)
+    pair_df = pairwise_long_table(matrices, meta)
+    pair_df.to_csv(out / "pairwise_similarity_long.csv", index=False)
     meta.to_csv(out / "similarity_target_metadata.csv", index=False)
+    plot_agreement_bars(compare, nn_summary, figs / "similarity_agreement_bars.png")
     plot_scatter(matrices, figs / "similarity_upper_triangle_scatter.png")
+    plot_pair_distribution(pair_df, figs / "similarity_difference_distributions.png")
     plot_block_heatmap(block_df, figs / "state_block_similarity_heatmap.png")
+    plot_block_summary(block_df, figs / "state_within_similarity_bars.png")
     render_html(out, compare, nn_summary, block_df)
 
     manifest = {
@@ -434,6 +519,7 @@ def main() -> int:
             "neighbor_overlap_summary.csv",
             "neighbor_overlap_by_target.csv",
             "state_block_similarity.csv",
+            "pairwise_similarity_long.csv",
         ],
     }
     (out / "similarity_atlas_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
